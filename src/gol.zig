@@ -43,6 +43,7 @@ const Gol = struct {
     sizeX: isize,
     sizeY: isize,
     map: []Point,
+    life: usize,
 
     pub fn deinit(self: *const Gol, allocator: Allocator) void {
         allocator.free(self.map);
@@ -62,7 +63,7 @@ const Gol = struct {
     }
 
     pub fn print(self: Gol) void {
-        std.debug.print("World: size={} ({}x{}):\n", .{ self.sizeX * self.sizeY, self.sizeX, self.sizeY });
+        std.debug.print("World: size={} ({}x{}), life={}:\n", .{ self.sizeX * self.sizeY, self.sizeX, self.sizeY, self.life });
         for (0..self.map.len) |i| {
             std.debug.print("- {}: {}\n", .{ i, self.map[i] });
         }
@@ -75,7 +76,7 @@ const Gol = struct {
     ///
     /// Next it refreshes the map to alive or unalive Points accoring to given rules.
     /// Finally reset neighbor counts for next iteration.
-    pub fn update(self: Gol) void {
+    pub fn update(self: *Gol) usize {
         var i: isize = -1;
 
         for (self.map) |p| {
@@ -93,14 +94,18 @@ const Gol = struct {
             }
         }
 
+        self.life = 0;
         for (self.map) |*p| {
             if (p.neighbors < 2 or p.neighbors > 3) {
                 p.alive = 0;
             } else if (p.neighbors == 3) {
                 p.alive = 1;
             }
+            if (p.alive == 1) self.life += 1;
             p.neighbors = 0;
         }
+
+        return self.life;
     }
 };
 
@@ -112,6 +117,7 @@ pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize) !Gol {
         .sizeX = x,
         .sizeY = y,
         .map = map,
+        .life = 0,
     };
 
     for (0..gol.map.len) |i| {
