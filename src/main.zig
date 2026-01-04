@@ -3,8 +3,6 @@ const zig_gol = @import("zig_gol");
 const gol = @import("gol.zig");
 const rl = @import("raylib");
 
-const TrackingAllocator = @import("trackingAllocator.zig").TrackingAllocator;
-
 pub fn main() !void {
     const sizeX: u16 = 1280; //3840;
     const sizeY: u16 = 720; //2160;
