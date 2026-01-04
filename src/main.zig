@@ -14,33 +14,35 @@ const aliveColor = Pixel{ .r = 0, .g = 255, .b = 0, .a = 255 };
 const deadColor = Pixel{ .r = 40, .g = 40, .b = 40, .a = 255 };
 
 pub fn main() !void {
-    const sizeX: u32 = 3840;
-    const sizeY: u32 = 2160;
+    const simulationSizeX: i32 = 480;
+    const simulationSizeY: i32 = 270;
+    var windowSizeX: i32 = 3840 - simulationSizeX;
+    var windowSizeY: i32 = 2160 - simulationSizeY;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Setup GoL world
-    var world = try gol.init(allocator, sizeX, sizeY, 18114);
+    var world = try gol.init(allocator, simulationSizeX, simulationSizeY, 18114);
     defer {
         world.deinit(allocator);
     }
 
     // Setup graphics
-    rl.initWindow(sizeX, sizeY, "Conway's Game of Life");
+    rl.initWindow(windowSizeX, windowSizeY, "Conway's Game of Life");
     defer rl.closeWindow();
 
-    const pixels = try allocator.alloc(Pixel, sizeX * sizeY);
+    const pixels = try allocator.alloc(Pixel, simulationSizeX * simulationSizeY);
     defer allocator.free(pixels);
 
-    const image = rl.genImageColor(sizeX, sizeY, rl.Color.dark_gray);
+    const image = rl.genImageColor(simulationSizeX, simulationSizeY, rl.Color.dark_gray);
     defer rl.unloadImage(image);
 
     const texture = try rl.loadTextureFromImage(image);
     defer rl.unloadTexture(texture);
 
-    // rl.setTargetFPS(40);
+    rl.setTargetFPS(30);
 
     // Main loop
     while (!rl.windowShouldClose()) {
@@ -57,10 +59,34 @@ pub fn main() !void {
         // Update text
         const statusText = rl.textFormat("FPS: %i\nLife: %i", .{ rl.getFPS(), world.life });
 
-        // Draw everything
         rl.beginDrawing();
         rl.clearBackground(rl.Color.black);
-        rl.drawTexture(texture, 0, 0, rl.Color.white);
+
+        // Calculate scaling
+        windowSizeX = rl.getScreenWidth();
+        windowSizeY = rl.getScreenHeight();
+
+        const scaleWidth = @as(f32, @floatFromInt(windowSizeX)) / @as(f32, @floatFromInt(simulationSizeX));
+        const scaleHeight = @as(f32, @floatFromInt(windowSizeY)) / @as(f32, @floatFromInt(simulationSizeY));
+        const scale: f32 = @min(scaleWidth, scaleHeight);
+
+        const drawWidth = @as(f32, simulationSizeX) * scale;
+        const drawHeight = @as(f32, simulationSizeY) * scale;
+
+        const offsetX = (@as(f32, @floatFromInt(windowSizeX)) - drawWidth) * 0.5;
+        const offsetY = (@as(f32, @floatFromInt(windowSizeY)) - drawHeight) * 0.5;
+
+        // Draw pixels
+        rl.drawTexturePro(
+            texture,
+            rl.Rectangle.init(0, 0, @floatFromInt(simulationSizeX), @floatFromInt(simulationSizeY)),
+            rl.Rectangle.init(offsetX, offsetY, drawWidth, drawHeight),
+            rl.Vector2.init(0, 0),
+            0.0,
+            rl.Color.white,
+        );
+
+        // Draw text
         rl.drawText(
             statusText,
             5,
@@ -76,6 +102,7 @@ pub fn main() !void {
             rl.Color.red,
         );
         rl.drawText(statusText, 5, 5, 20, rl.Color.red);
+
         rl.endDrawing();
 
         // Update state
