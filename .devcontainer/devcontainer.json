@@ -43,5 +43,11 @@
 			"packages": "x11-common,libxcursor-dev,libxinerama-dev,libxi-dev,libxrandr-dev,libglx-dev",
 			"ppas": "ppa:deadsnakes/ppa"
 		}
-	}
+	},
+	"runArgs": [
+		"--device=/dev/dri",
+		"--group-add=video",
+		"--env=DISPLAY",
+		"--volume=/tmp/.X11-unix:/tmp/.X11-unix"
+	]
 }
