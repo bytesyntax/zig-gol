@@ -1,38 +1,48 @@
 const std = @import("std");
 const zig_gol = @import("zig_gol");
 const gol = @import("gol.zig");
+const rl = @import("raylib");
 
 const TrackingAllocator = @import("trackingAllocator.zig").TrackingAllocator;
 
 pub fn main() !void {
-    const sizeX: usize = 3840;
-    const sizeY: usize = 2160;
-
-    std.debug.print("Creating a {}x{} world\n", .{ sizeX, sizeY });
+    const sizeX: u16 = 1280; //3840;
+    const sizeY: u16 = 720; //2160;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var tracker = TrackingAllocator{
-        .child = gpa.allocator(),
-    };
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    const allocator = tracker.allocator();
-
-    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // defer _ = gpa.deinit();
-    // const alloc = gpa.allocator();
-
-    const world = try gol.init(allocator, sizeX, sizeY);
+    var world = try gol.init(allocator, sizeX, sizeY, 18114);
     defer {
         world.deinit(allocator);
     }
 
-    // world.print();
-    std.debug.print("Get point {}x{} = {?}\n", .{ 1, 1, world.getPoint(1, 1) });
-    std.debug.print("Get point {}x{} = {?}\n", .{ 2, 0, world.getPoint(2, 0) });
+    rl.initWindow(sizeX, sizeY, "Conway's Game of Life");
+    defer rl.closeWindow();
 
-    std.debug.print("live bytes: {}\npeak bytes: {}\n", .{ tracker.live_bytes, tracker.peak_bytes });
+    const renderTexture = try rl.loadRenderTexture(sizeX, sizeY);
+    defer rl.unloadRenderTexture(renderTexture);
 
-    std.debug.print("The world will die...\n", .{});
+    while (!rl.windowShouldClose()) {
+        rl.beginTextureMode(renderTexture);
+        rl.clearBackground(rl.Color.gray);
+        for (0..sizeX) |x| {
+            for (0..sizeY) |y| {
+                const index = x * @as(usize, @abs(world.sizeY)) + y;
+                if (world.map[index].alive == 1) {
+                    if (x > 1275 and y >= 719) std.Thread.sleep(1_000_000_000);
+                    rl.drawPixel(@intCast(x), @intCast(y), rl.Color.green);
+                }
+            }
+        }
+        rl.drawFPS(5, 5);
+        rl.endTextureMode();
 
-    // std.debug.print("{any}\n", .{world.map});
+        rl.beginDrawing();
+        defer rl.endDrawing();
+        rl.drawTextureRec(renderTexture.texture, rl.Rectangle.init(0, 0, @as(f32, sizeX), -@as(f32, sizeY)), rl.Vector2.init(0, 0), rl.Color.white);
+
+        _ = world.update();
+    }
 }
