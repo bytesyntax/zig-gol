@@ -5,7 +5,6 @@
 //! to the ruleset.
 const std = @import("std");
 const zig_gol = @import("zig_gol");
-
 const Allocator = std.mem.Allocator;
 
 /// Point is one potential "life" entity in Conway's Game of Life
@@ -16,25 +15,6 @@ const Allocator = std.mem.Allocator;
 const Point = packed struct {
     alive: u1,
     neighbors: u5,
-};
-
-/// NeighborOffset is used as to iterate over all potential neighbours
-const NeighborOffset = packed struct {
-    xOffset: i4,
-    yOffset: i4,
-};
-
-/// neighborOffsets contains all potential neighbour offsets for a given
-/// point in a 2D coordinate system, i.e. all 8 surrounding point offsets.
-const neighborOffsets = [_]NeighborOffset{
-    NeighborOffset{ .xOffset = -1, .yOffset = -1 },
-    NeighborOffset{ .xOffset = -1, .yOffset = 0 },
-    NeighborOffset{ .xOffset = -1, .yOffset = 1 },
-    NeighborOffset{ .xOffset = 0, .yOffset = -1 },
-    NeighborOffset{ .xOffset = 0, .yOffset = 1 },
-    NeighborOffset{ .xOffset = 1, .yOffset = -1 },
-    NeighborOffset{ .xOffset = 1, .yOffset = 0 },
-    NeighborOffset{ .xOffset = 1, .yOffset = 1 },
 };
 
 const XorShiftState = struct {
@@ -53,19 +33,6 @@ const Gol = struct {
         allocator.free(self.map);
     }
 
-    /// Get the point index in the world map for a given x-y coordinate, or null
-    /// if it is outside the world.
-    ///
-    /// Needs to accept negative coordinate values as these might be the result
-    /// of calcuating neighbor offsets. If an invalid coordinate is provided the
-    /// function will return null.
-    pub fn getPointIndex(self: *const Gol, x: i32, y: i32) ?usize {
-        if (x < 0 or y < 0 or x >= self.sizeX or y >= self.sizeY) return null;
-        const index = x * self.sizeY + y;
-        if (index >= self.map.len or index < 0) return null;
-        return @intCast(index);
-    }
-
     pub fn print(self: Gol) void {
         std.debug.print("World: size={} ({}x{}), life={}:\n", .{ self.sizeX * self.sizeY, self.sizeX, self.sizeY, self.life });
         for (0..self.map.len) |i| {
@@ -75,41 +42,60 @@ const Gol = struct {
 
     /// Update the world for the next iteration.
     ///
-    /// Checks each Point in the map and if that is alive it adds to neighbor count
+    /// Checks each Point in the map and if it is alive it adds to neighbor count
     /// of all surrounding Points.
     ///
     /// Next it refreshes the map to alive or unalive Points accoring to given rules.
     /// Finally reset neighbor counts for next iteration.
     pub fn update(self: *Gol) void {
-        var i: i32 = -1;
+        // Index offset of surrounding neighbors
+        const neighborOffsets = [_]i32{
+            -self.sizeX - 1,
+            -self.sizeX,
+            -self.sizeX + 1,
+            -1,
+            1,
+            self.sizeX - 1,
+            self.sizeX,
+            self.sizeX + 1,
+        };
 
-        for (self.map) |p| {
-            i += 1;
-            if (p.alive == 1) {
-                for (neighborOffsets) |offset| {
-                    const neighborIndex = self.getPointIndex(
-                        @divTrunc(i, self.sizeY) + offset.xOffset,
-                        @rem(i, self.sizeY) + offset.yOffset,
-                    );
-                    if (neighborIndex != null) {
-                        self.map[neighborIndex.?].neighbors += 1;
+        // For each Point that is alive; add 1 to each surrounding points neighbor field
+        for (0..@intCast(self.sizeY)) |y| {
+            const rowOffset = @abs(self.sizeX) * y;
+            for (0..@intCast(self.sizeX)) |x| {
+                const index = rowOffset + x;
+                // Only add to neighbors of alive Points
+                if (self.map[index].alive == 1) {
+                    for (neighborOffsets) |neighborOffset| {
+                        const neighborIndex = @as(i32, @intCast(index)) + neighborOffset;
+                        // Verify index within range
+                        if (neighborIndex > 0 and neighborIndex < self.map.len) {
+                            self.map[@as(usize, @intCast(neighborIndex))].neighbors += 1;
+                        }
                     }
                 }
             }
         }
 
+        // Implement Game of Life rules
         self.life = 0;
         for (self.map) |*p| {
+            // Die of under of over populated
             if (p.neighbors < 2 or p.neighbors > 3) {
                 p.alive = 0;
-            } else if (p.neighbors == 3) {
+            }
+            // Born or still alive (implicit final else just leaves it as-is)
+            else if (p.neighbors == 3) {
                 p.alive = 1;
             }
+
             if (p.alive == 1) self.life += 1;
             p.neighbors = 0;
         }
     }
 
+    // Seed generation for initial setup
     fn xorshift(state: *XorShiftState) u32 {
         var s = state.state;
         s ^= s << 13;
@@ -119,6 +105,7 @@ const Gol = struct {
         return s;
     }
 
+    // Initialize alive before start
     pub fn generateState(self: *Gol, seed: u32) void {
         var state = XorShiftState{ .state = seed };
         for (self.map) |*p| {
