@@ -15,7 +15,7 @@ const Allocator = std.mem.Allocator;
 /// will end up.
 const Point = packed struct {
     alive: u1,
-    neighbors: u3,
+    neighbors: u5,
 };
 
 /// NeighborOffset is used as to iterate over all potential neighbours
@@ -35,6 +35,10 @@ const neighborOffsets = [_]NeighborOffset{
     NeighborOffset{ .xOffset = 1, .yOffset = -1 },
     NeighborOffset{ .xOffset = 1, .yOffset = 0 },
     NeighborOffset{ .xOffset = 1, .yOffset = 1 },
+};
+
+const XorShiftState = struct {
+    state: u32,
 };
 
 /// Gol is the main object that contains information about the world dimensions
@@ -107,13 +111,34 @@ const Gol = struct {
 
         return self.life;
     }
+
+    fn xorshift(state: *XorShiftState) u32 {
+        var s = state.state;
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        state.state = s;
+        return s;
+    }
+
+    pub fn generateState(self: *Gol, seed: u32) void {
+        var state = XorShiftState{ .state = seed };
+        for (self.map) |*p| {
+            if ((xorshift(&state) & 1) != 0) {
+                p.alive = 1;
+                self.life += 1;
+            } else {
+                p.alive = 0;
+            }
+        }
+    }
 };
 
 /// Init function to allocate memory and initialize the Points
-pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize) !Gol {
+pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize, seed: u32) !Gol {
     const map = try allocator.alloc(Point, x * y);
 
-    const gol = Gol{
+    var gol = Gol{
         .sizeX = x,
         .sizeY = y,
         .map = map,
@@ -125,9 +150,9 @@ pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize) !Gol {
         gol.map[i].neighbors = 0;
     }
 
-    gol.map[gol.getPointIndex(1, 0).?].alive = 1;
-    gol.map[gol.getPointIndex(1, 1).?].alive = 1;
-    gol.map[gol.getPointIndex(1, 2).?].alive = 1;
+    if (seed != 0) {
+        gol.generateState(seed);
+    }
 
     return gol;
 }
