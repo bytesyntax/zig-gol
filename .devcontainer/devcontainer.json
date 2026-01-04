@@ -45,8 +45,12 @@
 		}
 	},
 	"runArgs": [
-		"--device=/dev/dri",
-		"--group-add=video",
+		// For GPU rendering 
+		// "--device=/dev/dri",
+		// "--group-add=video",
+		// For SW rendering
+		"--env=LIBGL_ALWAYS_SOFTWARE=1",
+		// ----------------
 		"--env=DISPLAY",
 		"--volume=/tmp/.X11-unix:/tmp/.X11-unix"
 	]
