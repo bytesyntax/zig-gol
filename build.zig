@@ -96,13 +96,6 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("raylib", raylib);
     exe.root_module.addImport("raygui", raygui);
 
-    exe.linkSystemLibrary("X11");
-    exe.linkSystemLibrary("Xcursor");
-    exe.linkSystemLibrary("Xinerama");
-    exe.linkSystemLibrary("Xi");
-    exe.linkSystemLibrary("Xrandr");
-    exe.linkSystemLibrary("GLX");
-
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden

@@ -44,8 +44,8 @@ const XorShiftState = struct {
 /// Gol is the main object that contains information about the world dimensions
 /// as well as a list of all the Points within this 2D universe.
 const Gol = struct {
-    sizeX: u32,
-    sizeY: u32,
+    sizeX: i32,
+    sizeY: i32,
     map: []Point,
     life: usize,
 
@@ -59,7 +59,7 @@ const Gol = struct {
     /// Needs to accept negative coordinate values as these might be the result
     /// of calcuating neighbor offsets. If an invalid coordinate is provided the
     /// function will return null.
-    pub fn getPointIndex(self: *const Gol, x: isize, y: isize) ?usize {
+    pub fn getPointIndex(self: *const Gol, x: i32, y: i32) ?usize {
         if (x < 0 or y < 0 or x >= self.sizeX or y >= self.sizeY) return null;
         const index = x * self.sizeY + y;
         if (index >= self.map.len or index < 0) return null;
@@ -80,8 +80,8 @@ const Gol = struct {
     ///
     /// Next it refreshes the map to alive or unalive Points accoring to given rules.
     /// Finally reset neighbor counts for next iteration.
-    pub fn update(self: *Gol) usize {
-        var i: isize = -1;
+    pub fn update(self: *Gol) void {
+        var i: i32 = -1;
 
         for (self.map) |p| {
             i += 1;
@@ -108,8 +108,6 @@ const Gol = struct {
             if (p.alive == 1) self.life += 1;
             p.neighbors = 0;
         }
-
-        return self.life;
     }
 
     fn xorshift(state: *XorShiftState) u32 {
