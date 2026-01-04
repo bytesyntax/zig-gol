@@ -13,7 +13,6 @@
 	"securityOpt": [
 		"seccomp=unconfined"
 	],
-	"features": {},
 	"customizations": {
 		"vscode": {
 			"settings": {
@@ -36,5 +35,13 @@
 			]
 		}
 	},
-	"remoteUser": "vscode"
+	"remoteUser": "vscode",
+	"features": {
+		"ghcr.io/devcontainers-extra/features/apt-packages:1": {
+			"clean_ppas": true,
+			"preserve_apt_list": true,
+			"packages": "x11-common,libxcursor-dev,libxinerama-dev,libxi-dev,libxrandr-dev,libglx-dev",
+			"ppas": "ppa:deadsnakes/ppa"
+		}
+	}
 }
