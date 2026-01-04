@@ -44,8 +44,8 @@ const XorShiftState = struct {
 /// Gol is the main object that contains information about the world dimensions
 /// as well as a list of all the Points within this 2D universe.
 const Gol = struct {
-    sizeX: isize,
-    sizeY: isize,
+    sizeX: u32,
+    sizeY: u32,
     map: []Point,
     life: usize,
 
@@ -59,7 +59,7 @@ const Gol = struct {
     /// Needs to accept negative coordinate values as these might be the result
     /// of calcuating neighbor offsets. If an invalid coordinate is provided the
     /// function will return null.
-    fn getPointIndex(self: *const Gol, x: isize, y: isize) ?usize {
+    pub fn getPointIndex(self: *const Gol, x: isize, y: isize) ?usize {
         if (x < 0 or y < 0 or x >= self.sizeX or y >= self.sizeY) return null;
         const index = x * self.sizeY + y;
         if (index >= self.map.len or index < 0) return null;
