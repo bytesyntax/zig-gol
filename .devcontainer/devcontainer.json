@@ -37,13 +37,9 @@
 	},
 	"remoteUser": "vscode",
 	"features": {
-		"ghcr.io/devcontainers-extra/features/apt-packages:1": {
-			"clean_ppas": true,
-			"preserve_apt_list": true,
-			"packages": "x11-common,libxcursor-dev,libxinerama-dev,libxi-dev,libxrandr-dev,libglx-dev",
-			"ppas": "ppa:deadsnakes/ppa"
-		}
+		"ghcr.io/devcontainers/features/python:1": {}
 	},
+	"postCreateCommand": "sudo apt update && sudo apt install -y x11-common libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev libglx-dev",
 	"runArgs": [
 		// For GPU rendering 
 		// "--device=/dev/dri",
