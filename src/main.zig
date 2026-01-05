@@ -91,22 +91,21 @@ pub fn main() !void {
             rl.Color.white,
         );
 
-        // Draw text
+        // Draw shadow + text
         rl.drawText(
             statusText,
             7,
-            7,
-            20,
+            6,
+            22,
             rl.Color.black,
         );
         rl.drawText(
             statusText,
             4,
             4,
-            20,
-            rl.Color.red,
+            22,
+            rl.Color.magenta,
         );
-        rl.drawText(statusText, 5, 5, 20, rl.Color.red);
 
         rl.endDrawing();
 

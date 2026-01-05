@@ -100,6 +100,11 @@ const Gol = struct {
                 p.state += 1;
             }
 
+            // Update live points
+            if (p.alive == 1) {
+                self.life += 1;
+            }
+
             // Reset neighbors!!!!
             p.neighbors = 0;
         }
