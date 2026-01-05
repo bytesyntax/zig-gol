@@ -11,7 +11,7 @@ const Pixel = packed struct {
 };
 
 const aliveColor = Pixel{ .r = 0, .g = 255, .b = 0, .a = 255 };
-const deadColor = Pixel{ .r = 40, .g = 40, .b = 40, .a = 255 };
+const deadColor = Pixel{ .r = 64, .g = 0, .b = 0, .a = 255 };
 
 pub fn main() !void {
     const simulationSizeX: i32 = 480;
@@ -24,7 +24,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Setup GoL world
-    var world = try gol.init(allocator, simulationSizeX, simulationSizeY, 18114);
+    var world = try gol.init(allocator, simulationSizeX, simulationSizeY, 11418);
     defer {
         world.deinit(allocator);
     }
@@ -42,17 +42,22 @@ pub fn main() !void {
     const texture = try rl.loadTextureFromImage(image);
     defer rl.unloadTexture(texture);
 
-    rl.setTargetFPS(30);
+    rl.setTargetFPS(15);
 
     // Main loop
     while (!rl.windowShouldClose()) {
         // Update pixels
         for (pixels, world.map) |*px, cell| {
+            var color: Pixel = undefined;
             if (cell.alive == 1) {
-                px.* = aliveColor;
+                color = aliveColor;
+                if (cell.state != 0) color.a -= @as(u8, cell.state) * 24;
             } else {
-                px.* = deadColor;
+                color = deadColor;
+                if (cell.state != 0) color.a -= @as(u8, cell.state) * 24;
             }
+
+            px.* = color;
         }
         rl.updateTexture(texture, pixels.ptr);
 
@@ -89,8 +94,8 @@ pub fn main() !void {
         // Draw text
         rl.drawText(
             statusText,
-            5,
-            5,
+            7,
+            7,
             20,
             rl.Color.black,
         );

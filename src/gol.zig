@@ -14,7 +14,8 @@ const Allocator = std.mem.Allocator;
 /// will end up.
 const Point = packed struct {
     alive: u1,
-    neighbors: u5,
+    neighbors: u4,
+    state: u3,
 };
 
 const XorShiftState = struct {
@@ -48,31 +49,32 @@ const Gol = struct {
     /// Next it refreshes the map to alive or unalive Points accoring to given rules.
     /// Finally reset neighbor counts for next iteration.
     pub fn update(self: *Gol) void {
-        // Index offset of surrounding neighbors
-        const neighborOffsets = [_]i32{
-            -self.sizeX - 1,
-            -self.sizeX,
-            -self.sizeX + 1,
-            -1,
-            1,
-            self.sizeX - 1,
-            self.sizeX,
-            self.sizeX + 1,
-        };
+        const width: usize = @intCast(self.sizeX);
+        const height: usize = @intCast(self.sizeY);
 
-        // For each Point that is alive; add 1 to each surrounding points neighbor field
-        for (0..@intCast(self.sizeY)) |y| {
-            const rowOffset = @abs(self.sizeX) * y;
-            for (0..@intCast(self.sizeX)) |x| {
-                const index = rowOffset + x;
-                // Only add to neighbors of alive Points
-                if (self.map[index].alive == 1) {
-                    for (neighborOffsets) |neighborOffset| {
-                        const neighborIndex = @as(i32, @intCast(index)) + neighborOffset;
-                        // Verify index within range
-                        if (neighborIndex > 0 and neighborIndex < self.map.len) {
-                            self.map[@as(usize, @intCast(neighborIndex))].neighbors += 1;
-                        }
+        const offsets = [_]isize{ -1, 0, 1 };
+
+        for (0..height) |y| {
+            for (0..width) |x| {
+                const idx = y * width + x;
+                // Skip dead
+                if (self.map[idx].alive == 0) continue;
+
+                // Find all neighbors
+                for (offsets) |dy| {
+                    for (offsets) |dx| {
+                        // Skip self
+                        if (dx == 0 and dy == 0) continue;
+                        // Add offset
+                        const neighborX = @as(isize, @intCast(x)) + dx;
+                        const neighborY = @as(isize, @intCast(y)) + dy;
+                        // Validate within range
+                        if (neighborX < 0 or neighborY < 0) continue;
+                        if (neighborX >= width or neighborY >= height) continue;
+                        // Calculate index as usize
+                        const neighborIndex = @as(usize, @intCast(neighborY)) * width + @as(usize, @intCast(neighborX));
+                        // Update
+                        self.map[neighborIndex].neighbors += 1;
                     }
                 }
             }
@@ -81,16 +83,24 @@ const Gol = struct {
         // Implement Game of Life rules
         self.life = 0;
         for (self.map) |*p| {
-            // Die of under of over populated
-            if (p.neighbors < 2 or p.neighbors > 3) {
-                p.alive = 0;
+            if (p.alive == 0) {
+                // Newly born
+                if (p.neighbors == 3) {
+                    p.alive = 1;
+                    p.state = 0;
+                }
+            } else {
+                // Newly died
+                if (p.neighbors < 2 or p.neighbors > 3) {
+                    p.alive = 0;
+                    p.state = 0;
+                }
             }
-            // Born or still alive (implicit final else just leaves it as-is)
-            else if (p.neighbors == 3) {
-                p.alive = 1;
+            if (p.state < std.math.maxInt(@TypeOf(p.state))) {
+                p.state += 1;
             }
 
-            if (p.alive == 1) self.life += 1;
+            // Reset neighbors!!!!
             p.neighbors = 0;
         }
     }
@@ -133,6 +143,7 @@ pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize, seed: u3
     for (0..gol.map.len) |i| {
         gol.map[i].alive = 0;
         gol.map[i].neighbors = 0;
+        gol.map[i].state = 0;
     }
 
     if (seed != 0) {
