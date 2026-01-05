@@ -29,6 +29,7 @@ const Gol = struct {
     sizeY: i32,
     map: []Point,
     life: usize,
+    paused: bool,
 
     pub fn deinit(self: *const Gol, allocator: Allocator) void {
         allocator.free(self.map);
@@ -52,6 +53,7 @@ const Gol = struct {
         const width: usize = @intCast(self.sizeX);
         const height: usize = @intCast(self.sizeY);
 
+        if (self.paused) return;
         const offsets = [_]isize{ -1, 0, 1 };
 
         for (0..height) |y| {
@@ -96,17 +98,27 @@ const Gol = struct {
                     p.state = 0;
                 }
             }
-            if (p.state < std.math.maxInt(@TypeOf(p.state))) {
-                p.state += 1;
-            }
 
             // Update live points
             if (p.alive == 1) {
                 self.life += 1;
             }
 
+            if (p.state < std.math.maxInt(@TypeOf(p.state))) {
+                p.state += 1;
+            }
+
             // Reset neighbors!!!!
             p.neighbors = 0;
+        }
+    }
+
+    // Set the giveen Point alive
+    pub fn setAlive(self: Gol, x: i32, y: i32) void {
+        const idx = @as(usize, @intCast(y * self.sizeX + x));
+        if (idx > 0 and idx < self.map.len) {
+            self.map[idx].alive = 1;
+            self.map[idx].state = 0;
         }
     }
 
@@ -143,6 +155,7 @@ pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize, seed: u3
         .sizeY = y,
         .map = map,
         .life = 0,
+        .paused = false,
     };
 
     for (0..gol.map.len) |i| {
