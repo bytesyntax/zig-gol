@@ -14,10 +14,11 @@ const aliveColor = Pixel{ .r = 0, .g = 255, .b = 0, .a = 255 };
 const deadColor = Pixel{ .r = 64, .g = 0, .b = 0, .a = 255 };
 
 pub fn main() !void {
-    const simulationSizeX: i32 = 480;
-    const simulationSizeY: i32 = 270;
-    var windowSizeX: i32 = 3840 - simulationSizeX;
-    var windowSizeY: i32 = 2160 - simulationSizeY;
+    var windowSizeX: i32 = 3840 - 3840 / 8;
+    var windowSizeY: i32 = 2160 - 2160 / 8;
+    const simulationSizeX: i32 = 3840 / 8;
+    const simulationSizeY: i32 = 2160 / 8;
+    var paint = false;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -42,7 +43,7 @@ pub fn main() !void {
     const texture = try rl.loadTextureFromImage(image);
     defer rl.unloadTexture(texture);
 
-    rl.setTargetFPS(15);
+    rl.setTargetFPS(60);
 
     // Main loop
     while (!rl.windowShouldClose()) {
@@ -61,31 +62,27 @@ pub fn main() !void {
         }
         rl.updateTexture(texture, pixels.ptr);
 
-        // Update text
-        const statusText = rl.textFormat("FPS: %i\nLife: %i", .{ rl.getFPS(), world.life });
-
-        rl.beginDrawing();
-        rl.clearBackground(rl.Color.black);
-
         // Calculate scaling
         windowSizeX = rl.getScreenWidth();
         windowSizeY = rl.getScreenHeight();
 
         const scaleWidth = @as(f32, @floatFromInt(windowSizeX)) / @as(f32, @floatFromInt(simulationSizeX));
         const scaleHeight = @as(f32, @floatFromInt(windowSizeY)) / @as(f32, @floatFromInt(simulationSizeY));
-        const scale: f32 = @min(scaleWidth, scaleHeight);
 
-        const drawWidth = @as(f32, simulationSizeX) * scale;
-        const drawHeight = @as(f32, simulationSizeY) * scale;
+        const drawWidth = @as(f32, simulationSizeX) * scaleWidth;
+        const drawHeight = @as(f32, simulationSizeY) * scaleHeight;
 
-        const offsetX = (@as(f32, @floatFromInt(windowSizeX)) - drawWidth) * 0.5;
-        const offsetY = (@as(f32, @floatFromInt(windowSizeY)) - drawHeight) * 0.5;
+        // Update text
+        const statusText = rl.textFormat("FPS: %i\nLife: %i", .{ rl.getFPS(), world.life });
+
+        rl.beginDrawing();
+        rl.clearBackground(rl.Color.black);
 
         // Draw pixels
         rl.drawTexturePro(
             texture,
             rl.Rectangle.init(0, 0, @floatFromInt(simulationSizeX), @floatFromInt(simulationSizeY)),
-            rl.Rectangle.init(offsetX, offsetY, drawWidth, drawHeight),
+            rl.Rectangle.init(0, 0, drawWidth, drawHeight),
             rl.Vector2.init(0, 0),
             0.0,
             rl.Color.white,
@@ -109,6 +106,31 @@ pub fn main() !void {
 
         rl.endDrawing();
 
+        // Handle mouse input
+        if (rl.isMouseButtonPressed(rl.MouseButton.right)) {
+            world.paused = true;
+        }
+        if (rl.isMouseButtonReleased(rl.MouseButton.right)) {
+            world.paused = false;
+        }
+        if (rl.isMouseButtonPressed(rl.MouseButton.left)) {
+            paint = true;
+        }
+        if (rl.isMouseButtonReleased(rl.MouseButton.left)) {
+            paint = false;
+        }
+
+        // Handle mouse paint
+        if (world.paused and paint) {
+            const mousePos = rl.getMousePosition();
+            if (mousePos.x >= 0 and mousePos.y >= 0 and mousePos.x < drawWidth and mousePos.y < drawHeight) {
+                // Convert screen coordinates to simulation coordinates
+                const cellX = @as(i32, @intFromFloat(mousePos.x / scaleWidth));
+                const cellY = @as(i32, @intFromFloat(mousePos.y / scaleHeight));
+
+                world.setAlive(cellX, cellY);
+            }
+        }
         // Update state
         world.update();
     }
