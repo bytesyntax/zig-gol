@@ -62,31 +62,27 @@ pub fn main() !void {
         }
         rl.updateTexture(texture, pixels.ptr);
 
-        // Update text
-        const statusText = rl.textFormat("FPS: %i\nLife: %i", .{ rl.getFPS(), world.life });
-
-        rl.beginDrawing();
-        rl.clearBackground(rl.Color.black);
-
         // Calculate scaling
         windowSizeX = rl.getScreenWidth();
         windowSizeY = rl.getScreenHeight();
 
         const scaleWidth = @as(f32, @floatFromInt(windowSizeX)) / @as(f32, @floatFromInt(simulationSizeX));
         const scaleHeight = @as(f32, @floatFromInt(windowSizeY)) / @as(f32, @floatFromInt(simulationSizeY));
-        const scale: f32 = @min(scaleWidth, scaleHeight);
 
-        const drawWidth = @as(f32, simulationSizeX) * scale;
-        const drawHeight = @as(f32, simulationSizeY) * scale;
+        const drawWidth = @as(f32, simulationSizeX) * scaleWidth;
+        const drawHeight = @as(f32, simulationSizeY) * scaleHeight;
 
-        const offsetX = (@as(f32, @floatFromInt(windowSizeX)) - drawWidth) * 0.5;
-        const offsetY = (@as(f32, @floatFromInt(windowSizeY)) - drawHeight) * 0.5;
+        // Update text
+        const statusText = rl.textFormat("FPS: %i\nLife: %i", .{ rl.getFPS(), world.life });
+
+        rl.beginDrawing();
+        rl.clearBackground(rl.Color.black);
 
         // Draw pixels
         rl.drawTexturePro(
             texture,
             rl.Rectangle.init(0, 0, @floatFromInt(simulationSizeX), @floatFromInt(simulationSizeY)),
-            rl.Rectangle.init(offsetX, offsetY, drawWidth, drawHeight),
+            rl.Rectangle.init(0, 0, drawWidth, drawHeight),
             rl.Vector2.init(0, 0),
             0.0,
             rl.Color.white,
@@ -127,11 +123,14 @@ pub fn main() !void {
         // Handle mouse paint
         if (world.paused and paint) {
             const mousePos = rl.getMousePosition();
-            const cellX = @as(i32, @intFromFloat(@floor(mousePos.x / scaleWidth)));
-            const cellY = @as(i32, @intFromFloat(@floor(mousePos.y / scaleHeight)));
-            world.setAlive(cellX, cellY);
-        }
+            if (mousePos.x >= 0 and mousePos.y >= 0 and mousePos.x < drawWidth and mousePos.y < drawHeight) {
+                // Convert screen coordinates to simulation coordinates
+                const cellX = @as(i32, @intFromFloat(mousePos.x / scaleWidth));
+                const cellY = @as(i32, @intFromFloat(mousePos.y / scaleHeight));
 
+                world.setAlive(cellX, cellY);
+            }
+        }
         // Update state
         world.update();
     }
