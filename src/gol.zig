@@ -136,7 +136,7 @@ const Gol = struct {
     }
 
     // Initialize alive before start
-    pub fn generateState(self: *Gol, seed: u32) void {
+    pub fn generateStateFromSeed(self: *Gol, seed: u32) void {
         var state = XorShiftState{ .state = seed };
         for (self.map) |*p| {
             if ((xorshift(&state) & 1) != 0) {
@@ -191,7 +191,7 @@ const Gol = struct {
 };
 
 /// Init function to allocate memory and initialize the Points
-pub fn init(allocator: Allocator, x: usize, y: usize, seed: u32) !Gol {
+pub fn init(allocator: Allocator, x: usize, y: usize) !Gol {
     const map = try allocator.alloc(Point, x * y);
 
     var gol = Gol{
@@ -208,54 +208,83 @@ pub fn init(allocator: Allocator, x: usize, y: usize, seed: u32) !Gol {
         gol.map[i].state = 0;
     }
 
-    if (seed != 0) {
-        gol.generateState(seed);
-    }
+    return gol;
+}
+
+/// Init function from seed
+pub fn initFromSeed(allocator: Allocator, x: usize, y: usize, seed: u32) !Gol {
+    var gol = try init(allocator, x, y);
+
+    gol.generateStateFromSeed(seed);
 
     return gol;
 }
 
 /// Init function to allocate memory and initialize from RLE string
 pub fn initFromRLE(allocator: Allocator, rle: []u8) !Gol {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const temp_allocator = gpa.allocator();
+    const rle_data = try parseRleData(rle);
 
-    const pattern = "x\\s*=\\s*(\\d+),\\s*y\\s*=\\s*(\\d+)";
-    var regex = try Regex.compile(temp_allocator, pattern);
-    defer regex.deinit();
+    var gol = try init(allocator, rle_data.sizeX, rle_data.sizeY);
 
-    const match = try regex.find(rle) orelse
-        return error.InvalidRLEFormat;
-
-    const sizeX_str = match.captures[0];
-    const sizeY_str = match.captures[1];
-
-    const sizeX = std.fmt.parseInt(usize, sizeX_str, 10) catch
-        return error.InvalidRLEFormat;
-    const sizeY = std.fmt.parseInt(usize, sizeY_str, 10) catch
-        return error.InvalidRLEFormat;
-
-    var gol = try init(allocator, sizeX, sizeY, 0);
-
-    gol.generateStateFromRLE(rleBodySlice(rle));
+    gol.generateStateFromRLE(rle_data.body);
 
     return gol;
 }
 
-// Cut away the comment and header lines from RLE data
-fn rleBodySlice(rle: []const u8) []const u8 {
-    var i: usize = 0;
+/// Parse RLE format data to extract size information and body data
+fn parseRleData(rle: []const u8) !struct {
+    sizeX: usize,
+    sizeY: usize,
+    body: []const u8,
+} {
+    var lines = std.mem.splitScalar(u8, rle, '\n');
 
-    // Skip comment lines
-    while (i < rle.len and rle[i] == '#') {
-        while (i < rle.len and rle[i] != '\n') : (i += 1) {}
-        if (i < rle.len) i += 1;
+    while (lines.next()) |line| {
+        // Skip comments
+        if (line.len == 0 or line[0] == '#') continue;
+
+        // Found header line
+        if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " "), "x")) {
+            const dims = try parseXYLine(line);
+            const body = lines.rest();
+            return .{
+                .sizeX = dims.x,
+                .sizeY = dims.y,
+                .body = body,
+            };
+        }
     }
 
-    // Skip the x = ..., y = ... line
-    while (i < rle.len and rle[i] != '\n') : (i += 1) {}
-    if (i < rle.len) i += 1;
+    return error.InvalidRLEFormat;
+}
 
-    return rle[i..];
+/// Helper function to extract x/y values
+fn parseXYLine(line: []const u8) !struct { x: usize, y: usize } {
+    const trimmed = std.mem.trim(u8, line, " ");
+
+    // Split by comma: "x = 10" , " y = 20"
+    var parts = std.mem.splitScalar(u8, trimmed, ',');
+
+    const x_part = parts.next() orelse return error.InvalidRLEFormat;
+    const y_part = parts.next() orelse return error.InvalidRLEFormat;
+
+    return .{
+        .x = try parseKeyValue(x_part, 'x'),
+        .y = try parseKeyValue(y_part, 'y'),
+    };
+}
+
+/// Helper function to parse int values
+fn parseKeyValue(part: []const u8, key: u8) !usize {
+    const trimmed = std.mem.trim(u8, part, " ");
+
+    if (trimmed.len < 3 or trimmed[0] != key)
+        return error.InvalidRLEFormat;
+
+    const eq = std.mem.indexOfScalar(u8, trimmed, '=') orelse
+        return error.InvalidRLEFormat;
+
+    const value_str = std.mem.trim(u8, trimmed[eq + 1 ..], " ");
+
+    return std.fmt.parseInt(usize, value_str, 10);
 }

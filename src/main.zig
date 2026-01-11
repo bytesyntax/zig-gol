@@ -14,17 +14,15 @@ const aliveColor = Pixel{ .r = 0, .g = 255, .b = 0, .a = 255 };
 const deadColor = Pixel{ .r = 64, .g = 0, .b = 0, .a = 255 };
 
 pub fn main() !void {
-    var windowSizeX: i32 = rl.getScreenWidth();
-    var windowSizeY: i32 = rl.getScreenHeight();
-    var simulationSizeX: i32 = @divFloor(windowSizeX, 8);
-    var simulationSizeY: i32 = @divFloor(windowSizeY, 8);
+    var windowSizeX: i32 = 3840;
+    var windowSizeY: i32 = 2160;
     var paint = false;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Reading RLE data from file
+    // Setup world from RLE file
     std.debug.print("Reading RLE file...\n", .{});
     const rle_data = try std.fs.cwd().readFileAlloc(
         allocator,
@@ -33,15 +31,20 @@ pub fn main() !void {
     );
     errdefer allocator.free(rle_data);
 
-    // Setup GoL world
-    std.debug.print("Initializing world...\n", .{});
     var world = try gol.initFromRLE(allocator, rle_data);
     defer world.deinit(allocator);
-
     allocator.free(rle_data);
+    const simulationSizeX = world.sizeX;
+    const simulationSizeY = world.sizeY;
+    // -------------------------
 
-    simulationSizeX = world.sizeX;
-    simulationSizeY = world.sizeY;
+    // // Setup world from seed
+    // std.debug.print("Initializing world...\n", .{});
+    // const simulationSizeX: i32 = @divFloor(windowSizeX, 8);
+    // const simulationSizeY: i32 = @divFloor(windowSizeY, 8);
+    // var world = try gol.initFromSeed(allocator, @intCast(simulationSizeX), @intCast(simulationSizeY), 1337);
+    // defer world.deinit(allocator);
+    // // -------------------------
 
     // Setup graphics
     rl.initWindow(windowSizeX, windowSizeY, "Conway's Game of Life");
