@@ -6,6 +6,7 @@
 const std = @import("std");
 const zig_gol = @import("zig_gol");
 const Allocator = std.mem.Allocator;
+const Regex = @import("regex").Regex;
 
 /// Point is one potential "life" entity in Conway's Game of Life
 ///
@@ -144,15 +145,61 @@ const Gol = struct {
             }
         }
     }
+
+    pub fn generateStateFromRLE(self: *Gol, srle: []const u8) !void {
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
+        const temp_allocator = gpa.allocator();
+
+        const pattern = "(\\d*)([ob!\\$])";
+
+        var regex = try Regex.compile(temp_allocator, pattern);
+        defer regex.deinit();
+
+        const allMatch = try regex.findAll(temp_allocator, srle);
+        defer temp_allocator.free(allMatch);
+
+        var idx: usize = 0;
+        for (allMatch) |match| {
+            var repeat: usize = 0;
+            const repeat_str = match.captures[0];
+            repeat = std.fmt.parseInt(usize, repeat_str, 10) catch 1;
+            const action = match.captures[1][0];
+
+            for (0..repeat) |_| {
+                switch (action) {
+                    'b' => {
+                        // empty cell
+                        self.map[idx].alive = 0;
+                    },
+                    'o' => {
+                        // alive cell
+                        self.map[idx].alive = 1;
+                    },
+                    '$' => {
+                        // end of line
+                        idx = ((idx / @as(usize, @intCast(self.sizeX))) + 1) * @as(usize, @intCast(self.sizeX));
+                        continue;
+                    },
+                    '!' => {
+                        // end of file
+                        continue;
+                    },
+                    else => {},
+                }
+                idx += 1;
+            }
+        }
+    }
 };
 
 /// Init function to allocate memory and initialize the Points
-pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize, seed: u32) !Gol {
+pub fn init(allocator: Allocator, x: usize, y: usize, seed: u32) !Gol {
     const map = try allocator.alloc(Point, x * y);
 
     var gol = Gol{
-        .sizeX = x,
-        .sizeY = y,
+        .sizeX = @as(i32, @intCast(x)),
+        .sizeY = @as(i32, @intCast(y)),
         .map = map,
         .life = 0,
         .paused = false,
@@ -167,6 +214,34 @@ pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize, seed: u3
     if (seed != 0) {
         gol.generateState(seed);
     }
+
+    return gol;
+}
+
+/// Init function to allocate memory and initialize from RLE string
+pub fn initFromRLE(allocator: Allocator, rle: []const u8) !Gol {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const temp_allocator = gpa.allocator();
+
+    const pattern = "x\\s*=\\s*(\\d+),\\s*y\\s*=\\s*(\\d+)";
+    var regex = try Regex.compile(temp_allocator, pattern);
+    defer regex.deinit();
+
+    const match = try regex.find(rle) orelse
+        return error.InvalidRLEFormat;
+
+    const sizeX_str = match.captures[0];
+    const sizeY_str = match.captures[1];
+
+    const sizeX = std.fmt.parseInt(usize, sizeX_str, 10) catch
+        return error.InvalidRLEFormat;
+    const sizeY = std.fmt.parseInt(usize, sizeY_str, 10) catch
+        return error.InvalidRLEFormat;
+
+    var gol = try init(allocator, sizeX, sizeY, 0);
+
+    try gol.generateStateFromRLE(rle);
 
     return gol;
 }
