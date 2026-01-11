@@ -14,12 +14,8 @@ const aliveColor = Pixel{ .r = 0, .g = 255, .b = 0, .a = 255 };
 const deadColor = Pixel{ .r = 64, .g = 0, .b = 0, .a = 255 };
 
 pub fn main() !void {
-    // var windowSizeX: i32 = 3840 - 3840 / 8;
-    // var windowSizeY: i32 = 2160 - 2160 / 8;
-    // const simulationSizeX: i32 = 3840 / 8;
-    // const simulationSizeY: i32 = 2160 / 8;
-    var windowSizeX: i32 = 1280;
-    var windowSizeY: i32 = 720;
+    var windowSizeX: i32 = rl.getScreenWidth();
+    var windowSizeY: i32 = rl.getScreenHeight();
     var simulationSizeX: i32 = @divFloor(windowSizeX, 8);
     var simulationSizeY: i32 = @divFloor(windowSizeY, 8);
     var paint = false;
@@ -28,29 +24,30 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    // Reading RLE data from file
+    std.debug.print("Reading RLE file...\n", .{});
     const rle_data = try std.fs.cwd().readFileAlloc(
         allocator,
         "rle/clock.rle",
         std.math.maxInt(usize),
     );
-    defer allocator.free(rle_data);
+    errdefer allocator.free(rle_data);
 
     // Setup GoL world
-    // var world = try gol.init(allocator, simulationSizeX, simulationSizeY, 0);
+    std.debug.print("Initializing world...\n", .{});
     var world = try gol.initFromRLE(allocator, rle_data);
     defer world.deinit(allocator);
+
     allocator.free(rle_data);
 
     simulationSizeX = world.sizeX;
     simulationSizeY = world.sizeY;
 
-    // try world.generateStateFromRLE("10b5o3b2o$10b5o3b2o!");
-    // world.print();
-    world.paused = true;
-
     // Setup graphics
     rl.initWindow(windowSizeX, windowSizeY, "Conway's Game of Life");
     defer rl.closeWindow();
+
+    rl.toggleFullscreen();
 
     const pixels = try allocator.alloc(Pixel, @as(usize, @intCast(simulationSizeX * simulationSizeY)));
     defer allocator.free(pixels);
@@ -61,7 +58,7 @@ pub fn main() !void {
     const texture = try rl.loadTextureFromImage(image);
     defer rl.unloadTexture(texture);
 
-    rl.setTargetFPS(60);
+    rl.setTargetFPS(0);
 
     // Main loop
     while (!rl.windowShouldClose()) {
@@ -91,7 +88,7 @@ pub fn main() !void {
         const drawHeight = @as(f32, @floatFromInt(simulationSizeY)) * scaleHeight;
 
         // Update text
-        const statusText = rl.textFormat("FPS: %i\nLife: %i", .{ rl.getFPS(), world.life });
+        const statusText = rl.textFormat("FPS: %i\nLife: %i\nGeneration: %i", .{ rl.getFPS(), world.life, world.generation });
 
         rl.beginDrawing();
         rl.clearBackground(rl.Color.black);

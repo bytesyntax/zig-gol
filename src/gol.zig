@@ -31,6 +31,7 @@ const Gol = struct {
     map: []Point,
     life: usize,
     paused: bool,
+    generation: usize = 0,
 
     pub fn deinit(self: *const Gol, allocator: Allocator) void {
         allocator.free(self.map);
@@ -112,6 +113,7 @@ const Gol = struct {
             // Reset neighbors!!!!
             p.neighbors = 0;
         }
+        self.generation += 1;
     }
 
     // Set the giveen Point alive
@@ -146,48 +148,43 @@ const Gol = struct {
         }
     }
 
-    pub fn generateStateFromRLE(self: *Gol, srle: []const u8) !void {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        const temp_allocator = gpa.allocator();
-
-        const pattern = "(\\d*)([ob!\\$])";
-
-        var regex = try Regex.compile(temp_allocator, pattern);
-        defer regex.deinit();
-
-        const allMatch = try regex.findAll(temp_allocator, srle);
-        defer temp_allocator.free(allMatch);
-
+    // Initialize alive from RLE data
+    pub fn generateStateFromRLE(self: *Gol, srle: []const u8) void {
         var idx: usize = 0;
-        for (allMatch) |match| {
-            var repeat: usize = 0;
-            const repeat_str = match.captures[0];
-            repeat = std.fmt.parseInt(usize, repeat_str, 10) catch 1;
-            const action = match.captures[1][0];
+        var repeat: usize = 0;
 
-            for (0..repeat) |_| {
-                switch (action) {
-                    'b' => {
-                        // empty cell
-                        self.map[idx].alive = 0;
-                    },
-                    'o' => {
-                        // alive cell
-                        self.map[idx].alive = 1;
-                    },
-                    '$' => {
-                        // end of line
-                        idx = ((idx / @as(usize, @intCast(self.sizeX))) + 1) * @as(usize, @intCast(self.sizeX));
-                        continue;
-                    },
-                    '!' => {
-                        // end of file
-                        continue;
-                    },
-                    else => {},
-                }
-                idx += 1;
+        for (srle) |c| {
+            if (idx >= self.map.len) {
+                break;
+            }
+            switch (c) {
+                '0'...'9' => {
+                    repeat = repeat * 10 + (c - '0');
+                },
+
+                'b', 'o' => {
+                    const count = if (repeat == 0) 1 else repeat;
+                    repeat = 0;
+
+                    const alive: u1 = if (c == 'o') 1 else 0;
+                    for (0..count) |_| {
+                        self.map[idx].alive = alive;
+                        idx += 1;
+                    }
+                },
+
+                '$' => {
+                    const count = if (repeat == 0) 1 else repeat;
+                    repeat = 0;
+
+                    // advance rows WITHOUT looping per cell
+                    const row = idx / @as(usize, @intCast(self.sizeX));
+                    idx = (row + count) * @as(usize, @intCast(self.sizeX));
+                },
+
+                '!' => break,
+
+                else => {}, // ignore whitespace / comments if present
             }
         }
     }
@@ -219,7 +216,7 @@ pub fn init(allocator: Allocator, x: usize, y: usize, seed: u32) !Gol {
 }
 
 /// Init function to allocate memory and initialize from RLE string
-pub fn initFromRLE(allocator: Allocator, rle: []const u8) !Gol {
+pub fn initFromRLE(allocator: Allocator, rle: []u8) !Gol {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const temp_allocator = gpa.allocator();
@@ -241,7 +238,24 @@ pub fn initFromRLE(allocator: Allocator, rle: []const u8) !Gol {
 
     var gol = try init(allocator, sizeX, sizeY, 0);
 
-    try gol.generateStateFromRLE(rle);
+    gol.generateStateFromRLE(rleBodySlice(rle));
 
     return gol;
+}
+
+// Cut away the comment and header lines from RLE data
+fn rleBodySlice(rle: []const u8) []const u8 {
+    var i: usize = 0;
+
+    // Skip comment lines
+    while (i < rle.len and rle[i] == '#') {
+        while (i < rle.len and rle[i] != '\n') : (i += 1) {}
+        if (i < rle.len) i += 1;
+    }
+
+    // Skip the x = ..., y = ... line
+    while (i < rle.len and rle[i] != '\n') : (i += 1) {}
+    if (i < rle.len) i += 1;
+
+    return rle[i..];
 }
