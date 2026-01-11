@@ -6,7 +6,6 @@
 const std = @import("std");
 const zig_gol = @import("zig_gol");
 const Allocator = std.mem.Allocator;
-const Regex = @import("regex").Regex;
 
 /// Point is one potential "life" entity in Conway's Game of Life
 ///

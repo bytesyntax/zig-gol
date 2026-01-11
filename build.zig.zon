@@ -36,10 +36,6 @@
             .url = "git+https://github.com/raylib-zig/raylib-zig?ref=devel#a4d18b2d1cf8fdddec68b5b084535fca0475f466",
             .hash = "raylib_zig-5.6.0-dev-KE8REL5MBQAf3p497t52Xw9P7ojndIkVOWPXnLiLLw2P",
         },
-        .regex = .{
-            .url = "https://github.com/zig-utils/zig-regex/archive/d75526a959a3be854c043a92d123de3adaac3147.tar.gz",
-            .hash = "regex-0.1.0-btRPGTu4BgBtkrBfHIWJiAcSjQ5KAHksgs448XGtzBJb",
-        },
     },
     .paths = .{
         "build.zig",
