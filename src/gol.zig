@@ -6,6 +6,7 @@
 const std = @import("std");
 const zig_gol = @import("zig_gol");
 const Allocator = std.mem.Allocator;
+const Regex = @import("regex").Regex;
 
 /// Point is one potential "life" entity in Conway's Game of Life
 ///
@@ -30,6 +31,7 @@ const Gol = struct {
     map: []Point,
     life: usize,
     paused: bool,
+    generation: usize = 0,
 
     pub fn deinit(self: *const Gol, allocator: Allocator) void {
         allocator.free(self.map);
@@ -111,6 +113,7 @@ const Gol = struct {
             // Reset neighbors!!!!
             p.neighbors = 0;
         }
+        self.generation += 1;
     }
 
     // Set the giveen Point alive
@@ -133,7 +136,7 @@ const Gol = struct {
     }
 
     // Initialize alive before start
-    pub fn generateState(self: *Gol, seed: u32) void {
+    pub fn generateStateFromSeed(self: *Gol, seed: u32) void {
         var state = XorShiftState{ .state = seed };
         for (self.map) |*p| {
             if ((xorshift(&state) & 1) != 0) {
@@ -144,15 +147,56 @@ const Gol = struct {
             }
         }
     }
+
+    // Initialize alive from RLE data
+    pub fn generateStateFromRLE(self: *Gol, srle: []const u8) void {
+        var idx: usize = 0;
+        var repeat: usize = 0;
+
+        for (srle) |c| {
+            if (idx >= self.map.len) {
+                break;
+            }
+            switch (c) {
+                '0'...'9' => {
+                    repeat = repeat * 10 + (c - '0');
+                },
+
+                'b', 'o' => {
+                    const count = if (repeat == 0) 1 else repeat;
+                    repeat = 0;
+
+                    const alive: u1 = if (c == 'o') 1 else 0;
+                    for (0..count) |_| {
+                        self.map[idx].alive = alive;
+                        idx += 1;
+                    }
+                },
+
+                '$' => {
+                    const count = if (repeat == 0) 1 else repeat;
+                    repeat = 0;
+
+                    // advance rows WITHOUT looping per cell
+                    const row = idx / @as(usize, @intCast(self.sizeX));
+                    idx = (row + count) * @as(usize, @intCast(self.sizeX));
+                },
+
+                '!' => break,
+
+                else => {}, // ignore whitespace / comments if present
+            }
+        }
+    }
 };
 
 /// Init function to allocate memory and initialize the Points
-pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize, seed: u32) !Gol {
+pub fn init(allocator: Allocator, x: usize, y: usize) !Gol {
     const map = try allocator.alloc(Point, x * y);
 
     var gol = Gol{
-        .sizeX = x,
-        .sizeY = y,
+        .sizeX = @as(i32, @intCast(x)),
+        .sizeY = @as(i32, @intCast(y)),
         .map = map,
         .life = 0,
         .paused = false,
@@ -164,9 +208,83 @@ pub fn init(allocator: Allocator, comptime x: usize, comptime y: usize, seed: u3
         gol.map[i].state = 0;
     }
 
-    if (seed != 0) {
-        gol.generateState(seed);
-    }
+    return gol;
+}
+
+/// Init function from seed
+pub fn initFromSeed(allocator: Allocator, x: usize, y: usize, seed: u32) !Gol {
+    var gol = try init(allocator, x, y);
+
+    gol.generateStateFromSeed(seed);
 
     return gol;
+}
+
+/// Init function to allocate memory and initialize from RLE string
+pub fn initFromRLE(allocator: Allocator, rle: []u8) !Gol {
+    const rle_data = try parseRleData(rle);
+
+    var gol = try init(allocator, rle_data.sizeX, rle_data.sizeY);
+
+    gol.generateStateFromRLE(rle_data.body);
+
+    return gol;
+}
+
+/// Parse RLE format data to extract size information and body data
+fn parseRleData(rle: []const u8) !struct {
+    sizeX: usize,
+    sizeY: usize,
+    body: []const u8,
+} {
+    var lines = std.mem.splitScalar(u8, rle, '\n');
+
+    while (lines.next()) |line| {
+        // Skip comments
+        if (line.len == 0 or line[0] == '#') continue;
+
+        // Found header line
+        if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " "), "x")) {
+            const dims = try parseXYLine(line);
+            const body = lines.rest();
+            return .{
+                .sizeX = dims.x,
+                .sizeY = dims.y,
+                .body = body,
+            };
+        }
+    }
+
+    return error.InvalidRLEFormat;
+}
+
+/// Helper function to extract x/y values
+fn parseXYLine(line: []const u8) !struct { x: usize, y: usize } {
+    const trimmed = std.mem.trim(u8, line, " ");
+
+    // Split by comma: "x = 10" , " y = 20"
+    var parts = std.mem.splitScalar(u8, trimmed, ',');
+
+    const x_part = parts.next() orelse return error.InvalidRLEFormat;
+    const y_part = parts.next() orelse return error.InvalidRLEFormat;
+
+    return .{
+        .x = try parseKeyValue(x_part, 'x'),
+        .y = try parseKeyValue(y_part, 'y'),
+    };
+}
+
+/// Helper function to parse int values
+fn parseKeyValue(part: []const u8, key: u8) !usize {
+    const trimmed = std.mem.trim(u8, part, " ");
+
+    if (trimmed.len < 3 or trimmed[0] != key)
+        return error.InvalidRLEFormat;
+
+    const eq = std.mem.indexOfScalar(u8, trimmed, '=') orelse
+        return error.InvalidRLEFormat;
+
+    const value_str = std.mem.trim(u8, trimmed[eq + 1 ..], " ");
+
+    return std.fmt.parseInt(usize, value_str, 10);
 }

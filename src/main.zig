@@ -14,27 +14,45 @@ const aliveColor = Pixel{ .r = 0, .g = 255, .b = 0, .a = 255 };
 const deadColor = Pixel{ .r = 64, .g = 0, .b = 0, .a = 255 };
 
 pub fn main() !void {
-    var windowSizeX: i32 = 3840 - 3840 / 8;
-    var windowSizeY: i32 = 2160 - 2160 / 8;
-    const simulationSizeX: i32 = 3840 / 8;
-    const simulationSizeY: i32 = 2160 / 8;
+    var windowSizeX: i32 = 3840;
+    var windowSizeY: i32 = 2160;
     var paint = false;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Setup GoL world
-    var world = try gol.init(allocator, simulationSizeX, simulationSizeY, 11418);
-    defer {
-        world.deinit(allocator);
-    }
+    // Setup world from RLE file
+    std.debug.print("Reading RLE file...\n", .{});
+    const rle_data = try std.fs.cwd().readFileAlloc(
+        allocator,
+        "rle/clock.rle",
+        std.math.maxInt(usize),
+    );
+    errdefer allocator.free(rle_data);
+
+    var world = try gol.initFromRLE(allocator, rle_data);
+    defer world.deinit(allocator);
+    allocator.free(rle_data);
+    const simulationSizeX = world.sizeX;
+    const simulationSizeY = world.sizeY;
+    // -------------------------
+
+    // // Setup world from seed
+    // std.debug.print("Initializing world...\n", .{});
+    // const simulationSizeX: i32 = @divFloor(windowSizeX, 8);
+    // const simulationSizeY: i32 = @divFloor(windowSizeY, 8);
+    // var world = try gol.initFromSeed(allocator, @intCast(simulationSizeX), @intCast(simulationSizeY), 1337);
+    // defer world.deinit(allocator);
+    // // -------------------------
 
     // Setup graphics
     rl.initWindow(windowSizeX, windowSizeY, "Conway's Game of Life");
     defer rl.closeWindow();
 
-    const pixels = try allocator.alloc(Pixel, simulationSizeX * simulationSizeY);
+    rl.toggleFullscreen();
+
+    const pixels = try allocator.alloc(Pixel, @as(usize, @intCast(simulationSizeX * simulationSizeY)));
     defer allocator.free(pixels);
 
     const image = rl.genImageColor(simulationSizeX, simulationSizeY, rl.Color.dark_gray);
@@ -43,7 +61,7 @@ pub fn main() !void {
     const texture = try rl.loadTextureFromImage(image);
     defer rl.unloadTexture(texture);
 
-    rl.setTargetFPS(60);
+    rl.setTargetFPS(0);
 
     // Main loop
     while (!rl.windowShouldClose()) {
@@ -69,11 +87,11 @@ pub fn main() !void {
         const scaleWidth = @as(f32, @floatFromInt(windowSizeX)) / @as(f32, @floatFromInt(simulationSizeX));
         const scaleHeight = @as(f32, @floatFromInt(windowSizeY)) / @as(f32, @floatFromInt(simulationSizeY));
 
-        const drawWidth = @as(f32, simulationSizeX) * scaleWidth;
-        const drawHeight = @as(f32, simulationSizeY) * scaleHeight;
+        const drawWidth = @as(f32, @floatFromInt(simulationSizeX)) * scaleWidth;
+        const drawHeight = @as(f32, @floatFromInt(simulationSizeY)) * scaleHeight;
 
         // Update text
-        const statusText = rl.textFormat("FPS: %i\nLife: %i", .{ rl.getFPS(), world.life });
+        const statusText = rl.textFormat("FPS: %i\nLife: %i\nGeneration: %i", .{ rl.getFPS(), world.life, world.generation });
 
         rl.beginDrawing();
         rl.clearBackground(rl.Color.black);
