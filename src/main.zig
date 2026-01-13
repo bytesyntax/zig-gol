@@ -66,18 +66,22 @@ pub fn main() !void {
     // Main loop
     while (!rl.windowShouldClose()) {
         // Update pixels
-        for (pixels, world.map) |*px, cell| {
+        var idx: usize = 0;
+        for (world.map.rows) |row| {
             var color: Pixel = undefined;
-            if (cell.alive == 1) {
-                color = aliveColor;
-                if (cell.state != 0) color.a -= @as(u8, cell.state) * 24;
-            } else {
-                color = deadColor;
-                if (cell.state != 0) color.a -= @as(u8, cell.state) * 24;
+            for (row.points) |point| {
+                if (point.alive == 1) {
+                    color = aliveColor;
+                    if (point.state != 0) color.a -= @as(u8, point.state) * 24;
+                } else {
+                    color = deadColor;
+                    if (point.state != 0) color.a -= @as(u8, point.state) * 24;
+                }
+                pixels[idx] = color;
+                idx += 1;
             }
-
-            px.* = color;
         }
+
         rl.updateTexture(texture, pixels.ptr);
 
         // Calculate scaling

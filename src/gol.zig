@@ -18,6 +18,15 @@ const Point = packed struct {
     state: u3,
 };
 
+const Row = struct {
+    points: []Point,
+    m: std.Thread.Mutex,
+};
+
+const Map = struct {
+    rows: []Row,
+};
+
 const XorShiftState = struct {
     state: u32,
 };
@@ -27,13 +36,16 @@ const XorShiftState = struct {
 const Gol = struct {
     sizeX: i32,
     sizeY: i32,
-    map: []Point,
+    map: Map,
     life: usize,
     paused: bool,
     generation: usize = 0,
 
     pub fn deinit(self: *const Gol, allocator: Allocator) void {
-        allocator.free(self.map);
+        for (self.map.rows) |*row| {
+            allocator.free(row.points);
+        }
+        allocator.free(self.map.rows);
     }
 
     pub fn print(self: Gol) void {
@@ -51,17 +63,17 @@ const Gol = struct {
     /// Next it refreshes the map to alive or unalive Points accoring to given rules.
     /// Finally reset neighbor counts for next iteration.
     pub fn update(self: *Gol) void {
-        const width: usize = @intCast(self.sizeX);
-        const height: usize = @intCast(self.sizeY);
+        const rows: usize = @intCast(self.sizeY);
+        const cols: usize = @intCast(self.sizeX);
 
         if (self.paused) return;
         const offsets = [_]isize{ -1, 0, 1 };
 
-        for (0..height) |y| {
-            for (0..width) |x| {
-                const idx = y * width + x;
+        for (0..rows) |row| {
+            self.map.rows[row].m.lock();
+            for (0..cols) |col| {
                 // Skip dead
-                if (self.map[idx].alive == 0) continue;
+                if (self.map.rows[row].points[col].alive == 0) continue;
 
                 // Find all neighbors
                 for (offsets) |dy| {
@@ -69,58 +81,63 @@ const Gol = struct {
                         // Skip self
                         if (dx == 0 and dy == 0) continue;
                         // Add offset
-                        const neighborX = @as(isize, @intCast(x)) + dx;
-                        const neighborY = @as(isize, @intCast(y)) + dy;
+                        const neighborX = @as(isize, @intCast(col)) + dx;
+                        const neighborY = @as(isize, @intCast(row)) + dy;
                         // Validate within range
                         if (neighborX < 0 or neighborY < 0) continue;
-                        if (neighborX >= width or neighborY >= height) continue;
-                        // Calculate index as usize
-                        const neighborIndex = @as(usize, @intCast(neighborY)) * width + @as(usize, @intCast(neighborX));
+                        if (neighborX >= cols or neighborY >= rows) continue;
                         // Update
-                        self.map[neighborIndex].neighbors += 1;
+                        const neighborRow = @as(usize, @intCast(neighborY));
+                        const neighborCol = @as(usize, @intCast(neighborX));
+                        self.map.rows[neighborRow].points[neighborCol].neighbors += 1;
                     }
                 }
             }
+            self.map.rows[row].m.unlock();
         }
 
         // Implement Game of Life rules
         self.life = 0;
-        for (self.map) |*p| {
-            if (p.alive == 0) {
-                // Newly born
-                if (p.neighbors == 3) {
-                    p.alive = 1;
-                    p.state = 0;
+        for (self.map.rows) |row| {
+            for (row.points) |*p| {
+                if (p.alive == 0) {
+                    // Newly born
+                    if (p.neighbors == 3) {
+                        p.alive = 1;
+                        p.state = 0;
+                    }
+                } else {
+                    // Newly died
+                    if (p.neighbors < 2 or p.neighbors > 3) {
+                        p.alive = 0;
+                        p.state = 0;
+                    }
                 }
-            } else {
-                // Newly died
-                if (p.neighbors < 2 or p.neighbors > 3) {
-                    p.alive = 0;
-                    p.state = 0;
+
+                // Update live points
+                if (p.alive == 1) {
+                    self.life += 1;
                 }
-            }
 
-            // Update live points
-            if (p.alive == 1) {
-                self.life += 1;
-            }
+                if (p.state < std.math.maxInt(@TypeOf(p.state))) {
+                    p.state += 1;
+                }
 
-            if (p.state < std.math.maxInt(@TypeOf(p.state))) {
-                p.state += 1;
+                // Reset neighbors!!!!
+                p.neighbors = 0;
             }
-
-            // Reset neighbors!!!!
-            p.neighbors = 0;
         }
+
         self.generation += 1;
     }
 
     // Set the giveen Point alive
     pub fn setAlive(self: Gol, x: i32, y: i32) void {
-        const idx = @as(usize, @intCast(y * self.sizeX + x));
-        if (idx > 0 and idx < self.map.len) {
-            self.map[idx].alive = 1;
-            self.map[idx].state = 0;
+        if (x > 0 and y > 0 and x < self.sizeX and y < self.sizeY) {
+            const row = @as(usize, @intCast(y));
+            const col = @as(usize, @intCast(x));
+            self.map.rows[row].points[col].alive = 1;
+            self.map.rows[row].points[col].state = 0;
         }
     }
 
@@ -149,13 +166,11 @@ const Gol = struct {
 
     // Initialize alive from RLE data
     pub fn generateStateFromRLE(self: *Gol, srle: []const u8) void {
-        var idx: usize = 0;
+        var col: usize = 0;
         var repeat: usize = 0;
+        var row: usize = 0;
 
         for (srle) |c| {
-            if (idx >= self.map.len) {
-                break;
-            }
             switch (c) {
                 '0'...'9' => {
                     repeat = repeat * 10 + (c - '0');
@@ -167,8 +182,8 @@ const Gol = struct {
 
                     const alive: u1 = if (c == 'o') 1 else 0;
                     for (0..count) |_| {
-                        self.map[idx].alive = alive;
-                        idx += 1;
+                        self.map.rows[row].points[col].alive = alive;
+                        col += 1;
                     }
                 },
 
@@ -177,8 +192,8 @@ const Gol = struct {
                     repeat = 0;
 
                     // advance rows WITHOUT looping per cell
-                    const row = idx / @as(usize, @intCast(self.sizeX));
-                    idx = (row + count) * @as(usize, @intCast(self.sizeX));
+                    row += count;
+                    col = 0;
                 },
 
                 '!' => break,
@@ -191,21 +206,26 @@ const Gol = struct {
 
 /// Init function to allocate memory and initialize the Points
 pub fn init(allocator: Allocator, x: usize, y: usize) !Gol {
-    const map = try allocator.alloc(Point, x * y);
+    const rows = try allocator.alloc(Row, y);
+    for (rows) |*row| {
+        row.points = try allocator.alloc(Point, x);
+        for (row.points) |*point| {
+            point.* = .{
+                .alive = 0,
+                .neighbors = 0,
+                .state = 0,
+            };
+        }
+        row.m = std.Thread.Mutex{};
+    }
 
-    var gol = Gol{
+    const gol = Gol{
         .sizeX = @as(i32, @intCast(x)),
         .sizeY = @as(i32, @intCast(y)),
-        .map = map,
+        .map = Map{ .rows = rows },
         .life = 0,
         .paused = false,
     };
-
-    for (0..gol.map.len) |i| {
-        gol.map[i].alive = 0;
-        gol.map[i].neighbors = 0;
-        gol.map[i].state = 0;
-    }
 
     return gol;
 }
