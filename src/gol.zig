@@ -1,309 +1,307 @@
-//! Conway's Game of Life implemented in Zig
-//!
-//! This module provides a way to setup a new Game of Life in a world
-//! of given dimensions, as well as functions to update the world according
-//! to the ruleset.
 const std = @import("std");
-const zig_gol = @import("zig_gol");
-const Allocator = std.mem.Allocator;
 
-/// Point is one potential "life" entity in Conway's Game of Life
-///
-/// Has a field to indicate if it is alive or not and has a field
-/// used when counting neighbors to determine how next iteration
-/// will end up.
-const Point = packed struct {
-    alive: u1,
-    neighbors: u4,
-    state: u3,
-};
-
-const Row = struct {
-    points: []Point,
-    m: std.Thread.Mutex,
-};
-
-const Map = struct {
-    rows: []Row,
-};
-
-const XorShiftState = struct {
-    state: u32,
-};
-
-/// Gol is the main object that contains information about the world dimensions
-/// as well as a list of all the Points within this 2D universe.
-const Gol = struct {
-    sizeX: i32,
-    sizeY: i32,
-    map: Map,
-    life: usize,
+pub const Gol = struct {
+    width: usize,
+    height: usize,
+    words_per_row: usize,
+    generation: usize,
     paused: bool,
-    generation: usize = 0,
 
-    pub fn deinit(self: *const Gol, allocator: Allocator) void {
-        for (self.map.rows) |*row| {
-            allocator.free(row.points);
-        }
-        allocator.free(self.map.rows);
+    grid: []u64,
+    next: []u64,
+
+    allocator: std.mem.Allocator,
+
+    // ------------------------------------------------------------
+    // Constructors
+    // ------------------------------------------------------------
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        width: usize,
+        height: usize,
+    ) !Gol {
+        const words_per_row = (width + 63) / 64;
+        const total_words = words_per_row * height;
+
+        const grid = try allocator.alignedAlloc(u64, .@"64", total_words);
+        const next = try allocator.alignedAlloc(u64, .@"64", total_words);
+
+        @memset(grid, 0);
+        @memset(next, 0);
+
+        return Gol{
+            .width = width,
+            .height = height,
+            .words_per_row = words_per_row,
+            .generation = 0,
+            .paused = false,
+            .grid = grid,
+            .next = next,
+            .allocator = allocator,
+        };
     }
 
-    pub fn print(self: Gol) void {
-        std.debug.print("World: size={} ({}x{}), life={}:\n", .{ self.sizeX * self.sizeY, self.sizeX, self.sizeY, self.life });
-        for (0..self.map.len) |i| {
-            std.debug.print("- {}: {}\n", .{ i, self.map[i] });
-        }
+    pub fn initFromRLE(
+        allocator: std.mem.Allocator,
+        path: []const u8,
+    ) !Gol {
+        var file = try std.fs.cwd().openFile(path, .{});
+        defer file.close();
+
+        const data = try file.readToEndAlloc(allocator, 1 << 20);
+        defer allocator.free(data);
+
+        const dims = try parseRLEHeader(data);
+
+        var gol = try Gol.init(allocator, dims.width, dims.height);
+        try gol.parseRLEBody(data);
+
+        return gol;
     }
 
-    /// Update the world for the next iteration.
-    ///
-    /// Checks each Point in the map and if it is alive it adds to neighbor count
-    /// of all surrounding Points.
-    ///
-    /// Next it refreshes the map to alive or unalive Points accoring to given rules.
-    /// Finally reset neighbor counts for next iteration.
+    pub fn deinit(self: *Gol) void {
+        self.allocator.free(self.grid);
+        self.allocator.free(self.next);
+    }
+
+    // ------------------------------------------------------------
+    // Core Step (scalar bitboard)
+    // ------------------------------------------------------------
+
     pub fn update(self: *Gol) void {
-        const rows: usize = @intCast(self.sizeY);
-        const cols: usize = @intCast(self.sizeX);
-
         if (self.paused) return;
-        const offsets = [_]isize{ -1, 0, 1 };
 
-        for (0..rows) |row| {
-            self.map.rows[row].m.lock();
-            for (0..cols) |col| {
-                // Skip dead
-                if (self.map.rows[row].points[col].alive == 0) continue;
+        @setRuntimeSafety(false);
 
-                // Find all neighbors
-                for (offsets) |dy| {
-                    for (offsets) |dx| {
-                        // Skip self
-                        if (dx == 0 and dy == 0) continue;
-                        // Add offset
-                        const neighborX = @as(isize, @intCast(col)) + dx;
-                        const neighborY = @as(isize, @intCast(row)) + dy;
-                        // Validate within range
-                        if (neighborX < 0 or neighborY < 0) continue;
-                        if (neighborX >= cols or neighborY >= rows) continue;
-                        // Update
-                        const neighborRow = @as(usize, @intCast(neighborY));
-                        const neighborCol = @as(usize, @intCast(neighborX));
-                        self.map.rows[neighborRow].points[neighborCol].neighbors += 1;
-                    }
-                }
-            }
-            self.map.rows[row].m.unlock();
+        const h = self.height;
+        const wpr = self.words_per_row;
+
+        // ------------------------------------------------------------
+        // Clear borders in next buffer
+        // ------------------------------------------------------------
+
+        // Clear top and bottom rows entirely
+        for (0..wpr) |w| {
+            self.next[w] = 0;
+            self.next[(h - 1) * wpr + w] = 0;
         }
 
-        // Implement Game of Life rules
-        self.life = 0;
-        for (self.map.rows) |row| {
-            for (row.points) |*p| {
-                if (p.alive == 0) {
-                    // Newly born
-                    if (p.neighbors == 3) {
-                        p.alive = 1;
-                        p.state = 0;
+        // Clear only the leftmost and rightmost BITS
+        for (1..h - 1) |y| {
+            const row_base = y * wpr;
+
+            // Clear bit 0 (leftmost cell)
+            self.next[row_base] &= ~@as(u64, 1);
+
+            // Clear last bit (rightmost cell)
+            const last_bit_index = (self.width - 1) & 63;
+            const last_word = (self.width - 1) >> 6;
+            self.next[row_base + last_word] &=
+                ~(@as(u64, 1) << @intCast(last_bit_index));
+        }
+
+        // ------------------------------------------------------------
+        // Interior update
+        // ------------------------------------------------------------
+
+        for (1..h - 1) |y| {
+            for (0..wpr) |w| {
+                const north = self.grid[(y - 1) * wpr + w];
+                const center = self.grid[y * wpr + w];
+                const south = self.grid[(y + 1) * wpr + w];
+
+                const west =
+                    (center << 1) |
+                    (self.grid[y * wpr + (w - 1)] >> 63);
+
+                const east =
+                    (center >> 1) |
+                    (self.grid[y * wpr + (w + 1)] << 63);
+
+                const nw =
+                    (north << 1) |
+                    (self.grid[(y - 1) * wpr + (w - 1)] >> 63);
+
+                const ne =
+                    (north >> 1) |
+                    (self.grid[(y - 1) * wpr + (w + 1)] << 63);
+
+                const sw =
+                    (south << 1) |
+                    (self.grid[(y + 1) * wpr + (w - 1)] >> 63);
+
+                const se =
+                    (south >> 1) |
+                    (self.grid[(y + 1) * wpr + (w + 1)] << 63);
+
+                // --- Correct full 3-bit population counter ---
+
+                var c0: u64 = 0; // bit 0
+                var c1: u64 = 0; // bit 1
+                var c2: u64 = 0; // bit 2
+
+                const planes = [_]u64{
+                    north, south,
+                    east,  west,
+                    ne,    nw,
+                    se,    sw,
+                };
+
+                for (planes) |p| {
+                    const t0 = c0 ^ p;
+                    const carry0 = c0 & p;
+
+                    const t1 = c1 ^ carry0;
+                    const carry1 = c1 & carry0;
+
+                    c0 = t0;
+                    c1 = t1;
+                    c2 |= carry1;
+                }
+
+                const is3 = c0 & c1 & ~c2;
+                const is2 = ~c0 & c1 & ~c2;
+
+                var new_word = is3 | (center & is2);
+
+                // Mask off invalid bits in the last word of each row
+                if (w == wpr - 1) {
+                    const valid_bits = self.width & 63;
+
+                    if (valid_bits != 0) {
+                        const mask = (@as(u64, 1) << @intCast(valid_bits)) - 1;
+                        new_word &= mask;
                     }
-                } else {
-                    // Newly died
-                    if (p.neighbors < 2 or p.neighbors > 3) {
-                        p.alive = 0;
-                        p.state = 0;
-                    }
                 }
 
-                // Update live points
-                if (p.alive == 1) {
-                    self.life += 1;
-                }
-
-                if (p.state < std.math.maxInt(@TypeOf(p.state))) {
-                    p.state += 1;
-                }
-
-                // Reset neighbors!!!!
-                p.neighbors = 0;
+                self.next[y * wpr + w] = new_word;
             }
         }
 
+        // ------------------------------------------------------------
+        // Swap buffers
+        // ------------------------------------------------------------
+
+        std.mem.swap([]u64, &self.grid, &self.next);
         self.generation += 1;
     }
 
-    // Set the giveen Point alive
-    pub fn setAlive(self: Gol, x: i32, y: i32) void {
-        if (x > 0 and y > 0 and x < self.sizeX and y < self.sizeY) {
-            const row = @as(usize, @intCast(y));
-            const col = @as(usize, @intCast(x));
-            self.map.rows[row].points[col].alive = 1;
-            self.map.rows[row].points[col].state = 0;
+    // ------------------------------------------------------------
+    // RLE Parsing
+    // ------------------------------------------------------------
+
+    const RLEDims = struct {
+        width: usize,
+        height: usize,
+    };
+
+    fn parseRLEHeader(data: []const u8) !RLEDims {
+        var it = std.mem.tokenizeScalar(u8, data, '\n');
+
+        while (it.next()) |line| {
+            if (line.len == 0) continue;
+            if (line[0] == '#') continue;
+
+            // This should be the header line
+            // Example:
+            // x = 10284, y = 6796, rule = B3/S23
+
+            const x_pos = std.mem.indexOf(u8, line, "x =") orelse
+                return error.InvalidRLEHeader;
+
+            const y_pos = std.mem.indexOf(u8, line, "y =") orelse
+                return error.InvalidRLEHeader;
+
+            const width_start = x_pos + 3;
+            const height_start = y_pos + 3;
+
+            const width_end = std.mem.indexOfScalarPos(u8, line, width_start, ',') orelse line.len;
+
+            const height_end = std.mem.indexOfScalarPos(u8, line, height_start, ',') orelse line.len;
+
+            const width_str = std.mem.trim(u8, line[width_start..width_end], " ");
+            const height_str = std.mem.trim(u8, line[height_start..height_end], " ");
+
+            const width = try std.fmt.parseInt(usize, width_str, 10);
+            const height = try std.fmt.parseInt(usize, height_str, 10);
+
+            return RLEDims{
+                .width = width,
+                .height = height,
+            };
         }
+
+        return error.MissingRLEHeader;
     }
 
-    // Seed generation for initial setup
-    fn xorshift(state: *XorShiftState) u32 {
-        var s = state.state;
-        s ^= s << 13;
-        s ^= s >> 17;
-        s ^= s << 5;
-        state.state = s;
-        return s;
-    }
+    fn parseRLEBody(self: *Gol, data: []const u8) !void {
+        var x: usize = 0;
+        var y: usize = 0;
+        var run_count: usize = 0;
+        var i: usize = 0;
 
-    // Initialize alive before start
-    pub fn generateStateFromSeed(self: *Gol, seed: u32) void {
-        var state = XorShiftState{ .state = seed };
-        for (self.map) |*p| {
-            if ((xorshift(&state) & 1) != 0) {
-                p.alive = 1;
-                self.life += 1;
-            } else {
-                p.alive = 0;
+        // Skip header
+        while (i < data.len and data[i] != '\n') : (i += 1) {}
+        i += 1;
+
+        while (i < data.len) : (i += 1) {
+            const c = data[i];
+
+            if (c >= '0' and c <= '9') {
+                run_count = run_count * 10 + (c - '0');
+                continue;
             }
-        }
-    }
 
-    // Initialize alive from RLE data
-    pub fn generateStateFromRLE(self: *Gol, srle: []const u8) void {
-        var col: usize = 0;
-        var repeat: usize = 0;
-        var row: usize = 0;
+            const count = if (run_count == 0) 1 else run_count;
+            run_count = 0;
 
-        for (srle) |c| {
             switch (c) {
-                '0'...'9' => {
-                    repeat = repeat * 10 + (c - '0');
-                },
-
-                'b', 'o' => {
-                    const count = if (repeat == 0) 1 else repeat;
-                    repeat = 0;
-
-                    const alive: u1 = if (c == 'o') 1 else 0;
+                'o' => {
                     for (0..count) |_| {
-                        self.map.rows[row].points[col].alive = alive;
-                        col += 1;
+                        if (x < self.width and y < self.height) {
+                            self.setCell(x, y);
+                        }
+                        x += 1;
                     }
                 },
-
+                'b' => x += count,
                 '$' => {
-                    const count = if (repeat == 0) 1 else repeat;
-                    repeat = 0;
-
-                    // advance rows WITHOUT looping per cell
-                    row += count;
-                    col = 0;
+                    y += count;
+                    x = 0;
                 },
-
-                '!' => break,
-
-                else => {}, // ignore whitespace / comments if present
+                '!' => return,
+                '\n', '\r', ' ' => {},
+                else => {},
             }
         }
     }
+
+    inline fn idx(self: *const Gol, y: usize, word: usize) usize {
+        return y * self.words_per_row + word;
+    }
+
+    inline fn bitMask(x: usize) u64 {
+        const bit: u6 = @intCast(x & 63);
+        return (@as(u64, 1) << bit);
+    }
+
+    inline fn setCell(self: *Gol, x: usize, y: usize) void {
+        const word = x >> 6;
+        self.grid[self.idx(y, word)] |= bitMask(x);
+    }
+
+    pub inline fn getCell(self: *const Gol, x: usize, y: usize) bool {
+        const word = x >> 6;
+        const value = self.grid[self.idx(y, word)] & bitMask(x);
+        return value != 0;
+    }
+
+    pub fn countAlive(self: *const Gol) usize {
+        var total: usize = 0;
+        for (self.grid) |word| {
+            total += @popCount(word);
+        }
+        return total;
+    }
 };
-
-/// Init function to allocate memory and initialize the Points
-pub fn init(allocator: Allocator, x: usize, y: usize) !Gol {
-    const rows = try allocator.alloc(Row, y);
-    for (rows) |*row| {
-        row.points = try allocator.alloc(Point, x);
-        for (row.points) |*point| {
-            point.* = .{
-                .alive = 0,
-                .neighbors = 0,
-                .state = 0,
-            };
-        }
-        row.m = std.Thread.Mutex{};
-    }
-
-    const gol = Gol{
-        .sizeX = @as(i32, @intCast(x)),
-        .sizeY = @as(i32, @intCast(y)),
-        .map = Map{ .rows = rows },
-        .life = 0,
-        .paused = false,
-    };
-
-    return gol;
-}
-
-/// Init function from seed
-pub fn initFromSeed(allocator: Allocator, x: usize, y: usize, seed: u32) !Gol {
-    var gol = try init(allocator, x, y);
-
-    gol.generateStateFromSeed(seed);
-
-    return gol;
-}
-
-/// Init function to allocate memory and initialize from RLE string
-pub fn initFromRLE(allocator: Allocator, rle: []u8) !Gol {
-    const rle_data = try parseRleData(rle);
-
-    var gol = try init(allocator, rle_data.sizeX, rle_data.sizeY);
-
-    gol.generateStateFromRLE(rle_data.body);
-
-    return gol;
-}
-
-/// Parse RLE format data to extract size information and body data
-fn parseRleData(rle: []const u8) !struct {
-    sizeX: usize,
-    sizeY: usize,
-    body: []const u8,
-} {
-    var lines = std.mem.splitScalar(u8, rle, '\n');
-
-    while (lines.next()) |line| {
-        // Skip comments
-        if (line.len == 0 or line[0] == '#') continue;
-
-        // Found header line
-        if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " "), "x")) {
-            const dims = try parseXYLine(line);
-            const body = lines.rest();
-            return .{
-                .sizeX = dims.x,
-                .sizeY = dims.y,
-                .body = body,
-            };
-        }
-    }
-
-    return error.InvalidRLEFormat;
-}
-
-/// Helper function to extract x/y values
-fn parseXYLine(line: []const u8) !struct { x: usize, y: usize } {
-    const trimmed = std.mem.trim(u8, line, " ");
-
-    // Split by comma: "x = 10" , " y = 20"
-    var parts = std.mem.splitScalar(u8, trimmed, ',');
-
-    const x_part = parts.next() orelse return error.InvalidRLEFormat;
-    const y_part = parts.next() orelse return error.InvalidRLEFormat;
-
-    return .{
-        .x = try parseKeyValue(x_part, 'x'),
-        .y = try parseKeyValue(y_part, 'y'),
-    };
-}
-
-/// Helper function to parse int values
-fn parseKeyValue(part: []const u8, key: u8) !usize {
-    const trimmed = std.mem.trim(u8, part, " ");
-
-    if (trimmed.len < 3 or trimmed[0] != key)
-        return error.InvalidRLEFormat;
-
-    const eq = std.mem.indexOfScalar(u8, trimmed, '=') orelse
-        return error.InvalidRLEFormat;
-
-    const value_str = std.mem.trim(u8, trimmed[eq + 1 ..], " ");
-
-    return std.fmt.parseInt(usize, value_str, 10);
-}
