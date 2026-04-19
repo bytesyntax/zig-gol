@@ -14,8 +14,8 @@ const aliveColor = Pixel{ .r = 0, .g = 255, .b = 0, .a = 255 };
 const deadColor = Pixel{ .r = 64, .g = 0, .b = 0, .a = 255 };
 
 pub fn main() !void {
-    var windowSizeX: i32 = 3840;
-    var windowSizeY: i32 = 2160;
+    var windowSizeX: i32 = 1920;
+    var windowSizeY: i32 = 1080;
     var paint = false;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
