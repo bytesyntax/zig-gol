@@ -1,0 +1,39 @@
+x = 1000, y = 1000, rule = B3/S23
+
+# --- Blinker (period 2)
+50b3o$
+
+# --- Toad (period 2)
+$
+80b3o$
+81b3o$
+
+# --- Pulsar (period 3)
+$
+$
+200b3o3b3o$
+198bo3bo3bo3bo$
+197bo5bo5bo$
+198bo3bo3bo3bo$
+200b3o3b3o$
+
+# --- Glider (movement test)
+$
+$
+300bo$
+301bo$
+299b3o$
+
+# --- Block (still life)
+$
+$
+400b2o$
+400b2o$
+
+# --- Lightweight spaceship (movement test across words)
+$
+$
+500bo2bo$
+501b4o$
+502b2o2bo$
+!
